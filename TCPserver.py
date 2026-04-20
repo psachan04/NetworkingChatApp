@@ -1,3 +1,5 @@
+import json
+import time
 from socket import *
 from threading import Thread
 
@@ -45,26 +47,51 @@ def clientHandler(connectionSocket, addr):
     # wait for messages from the client
     while True:
         try:
-            sentence = connectionSocket.recv(1024)
+            sentence = connectionSocket.recv(4096)
             if not sentence: # if recv returns an empty byte string client has disconnected
                 break
             print("Message received:", sentence.decode())
-            decodeSentence = sentence.decode()
-            sentSentence = str(addr[1]) + ": " + sentence.decode()  # prepend client's port number to the message
-            if decodeSentence[0] == "@":
-                # PRAJ TODO
-                # extract the socket from message and send to the socket
-                parts = decodeSentence.split(" ", 1)
-                targetUsername = parts[0][1:] # extract username without @
-                if targetUsername in clientDict:
-                    targetSocket = clientDict[targetUsername]
-                    privateMessage(sentSentence.encode(), targetSocket)
+            
+            try:
+                # Handle Feature 3 JSON Application-Layer
+                data = json.loads(sentence.decode())
+                target = data.get("target", "ALL")
+                
+                if target == "ALL":
+                    broadcast(sentence, connectionSocket)
                 else:
-                    errorMsg = f"Error: Target user @{targetUsername} does not exist."
-                    connectionSocket.send(errorMsg.encode())
+                    if target in clientDict:
+                        targetSocket = clientDict[target]
+                        privateMessage(sentence, targetSocket)
+                    else:
+                        errorMsg = f"Error: Target user @{target} does not exist."
+                        error_data = {
+                            "sequence_number": 0,
+                            "timestamp": time.time(),
+                            "sender_username": "Server",
+                            "target": username,
+                            "payload": errorMsg
+                        }
+                        connectionSocket.send(json.dumps(error_data).encode())
                 continue
-            else: # no @ means user wanted to broadcast the message to all clients
-                broadcast(sentSentence.encode(), connectionSocket)
+            except json.JSONDecodeError:
+                # Fallback to the original plain string behavior
+                decodeSentence = sentence.decode()
+                sentSentence = str(addr[1]) + ": " + sentence.decode()  # prepend client's port number to the message
+                if decodeSentence[0] == "@":
+                    # PRAJ TODO
+                    # extract the socket from message and send to the socket
+                    parts = decodeSentence.split(" ", 1)
+                    targetUsername = parts[0][1:] # extract username without @
+                    if targetUsername in clientDict:
+                        targetSocket = clientDict[targetUsername]
+                        privateMessage(sentSentence.encode(), targetSocket)
+                    else:
+                        errorMsg = f"Error: Target user @{targetUsername} does not exist."
+                        connectionSocket.send(errorMsg.encode())
+                    continue
+                else: # no @ means user wanted to broadcast the message to all clients
+                    broadcast(sentSentence.encode(), connectionSocket)
         except:
             break
 
